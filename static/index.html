@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Prediction System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --transition-speed: 0.3s;
+        }
+        body {
+            transition: background-color var(--transition-speed), color var(--transition-speed);
+        }
+        .prediction-card {
+            transition: transform 0.3s, box-shadow 0.3s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .prediction-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+        .theme-toggle {
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            transition: background-color 0.3s;
+        }
+        .theme-toggle:hover {
+            background-color: rgba(128, 128, 128, 0.1);
+        }
+        .loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 20px;
+        }
+        [data-bs-theme="dark"] {
+            --bs-body-bg: #212529;
+            --bs-body-color: #f8f9fa;
+        }
+        .ticker-input {
+            text-transform: uppercase;
+        }
+        .prediction-badge {
+            font-size: 0.9rem;
+            padding: 0.5rem 1rem;
+        }
+        .trend-indicator {
+            font-size: 1.2rem;
+            margin-left: 0.5rem;
+        }
+        .confidence-meter {
+            height: 8px;
+            border-radius: 4px;
+            background: #e9ecef;
+            overflow: hidden;
+        }
+        .confidence-meter-fill {
+            height: 100%;
+            transition: width 0.6s ease;
+            background: linear-gradient(90deg, #dc3545 0%, #ffc107 50%, #198754 100%);
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg" data-bs-theme="dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-graph-up-arrow"></i> Stock Prediction System
+            </a>
+            <div class="ms-auto d-flex align-items-center">
+                <div class="theme-toggle" onclick="toggleTheme()" id="themeToggle">
+                    <i class="bi bi-sun-fill"></i>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row g-4">
+            <div class="col-md-6">
+                <div class="card prediction-card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="bi bi-search"></i> Stock Analysis
+                        </h5>
+                        <div class="mb-3">
+                            <label for="tickerInput" class="form-label">Stock Ticker</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control ticker-input" id="tickerInput" 
+                                       placeholder="Enter stock ticker (e.g., AAPL)">
+                                <button onclick="analyzeTicker()" class="btn btn-primary" id="analyzeBtn">
+                                    <i class="bi bi-graph-up"></i> Analyze
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card prediction-card">
+                    <div class="card-body">
+                        <h5 class="card-title">
+                            <i class="bi bi-activity"></i> System Status
+                        </h5>
+                        <div id="systemStatus">Checking status...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="resultsArea" style="display: none;" class="mt-4">
+            <div class="card prediction-card">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="bi bi-clipboard-data"></i> Analysis Results
+                    </h5>
+                    <div id="predictionResults"></div>
+                    <div class="chart-container">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Theme management
+        function toggleTheme() {
+            const html = document.documentElement;
+            const themeToggle = document.getElementById('themeToggle');
+            const currentTheme = html.getAttribute('data-bs-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            html.setAttribute('data-bs-theme', newTheme);
+            themeToggle.innerHTML = newTheme === 'dark' 
+                ? '<i class="bi bi-moon-fill"></i>' 
+                : '<i class="bi bi-sun-fill"></i>';
+            
+            localStorage.setItem('theme', newTheme);
+        }
+
+        // Load saved theme
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        document.documentElement.setAttribute('data-bs-theme', savedTheme);
+        document.getElementById('themeToggle').innerHTML = savedTheme === 'dark'
+            ? '<i class="bi bi-moon-fill"></i>'
+            : '<i class="bi bi-sun-fill"></i>';
+
+        let priceChart = null;
+
+        async function checkHealth() {
+            try {
+                const response = await fetch('http://localhost:5000/health');
+                const data = await response.json();
+                document.getElementById('systemStatus').innerHTML = `
+                    <div class="alert alert-success mb-0">
+                        <i class="bi bi-check-circle-fill"></i> System is healthy
+                        <small class="d-block mt-1">Last checked: ${new Date().toLocaleTimeString()}</small>
+                    </div>`;
+            } catch (error) {
+                document.getElementById('systemStatus').innerHTML = `
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-exclamation-triangle-fill"></i> System is not responding
+                        <small class="d-block mt-1">${error.message}</small>
+                    </div>`;
+            }
+        }
+
+        async function analyzeTicker() {
+            const ticker = document.getElementById('tickerInput').value.toUpperCase();
+            if (!ticker) {
+                alert('Please enter a stock ticker');
+                return;
+            }
+
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const resultsArea = document.getElementById('resultsArea');
+            const predictionResults = document.getElementById('predictionResults');
+
+            try {
+                analyzeBtn.disabled = true;
+                resultsArea.style.display = 'block';
+                predictionResults.innerHTML = `
+                    <div class="d-flex justify-content-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>`;
+
+                const predictionResponse = await fetch(`http://localhost:5000/predict/${ticker}`);
+                const prediction = await predictionResponse.json();
+
+                if (predictionResponse.status !== 200) {
+                    throw new Error(prediction.error || 'Failed to get prediction');
+                }
+
+                const analysisResponse = await fetch(`http://localhost:5000/analyze/${ticker}`);
+                const analysis = await analysisResponse.json();
+
+                displayResults(prediction, analysis);
+                updateChart(prediction);
+            } catch (error) {
+                predictionResults.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-circle-fill"></i> ${error.message}
+                        <small class="d-block mt-2">Please try another stock symbol.</small>
+                    </div>`;
+            } finally {
+                analyzeBtn.disabled = false;
+            }
+        }
+
+        function displayResults(prediction, analysis) {
+            const formatNumber = (num) => {
+                if (num === undefined || num === null || isNaN(num)) return '0.00';
+                return Number(num).toFixed(2);
+            };
+
+            const formatPercentage = (num) => {
+                if (num === undefined || num === null || isNaN(num)) return '0.00';
+                return (Number(num) * 100).toFixed(2);
+            };
+
+            const getTrendIcon = (current, predicted) => {
+                return predicted > current 
+                    ? '<i class="bi bi-arrow-up-circle-fill text-success"></i>'
+                    : '<i class="bi bi-arrow-down-circle-fill text-danger"></i>';
+            };
+
+            const getConfidenceClass = (confidence) => {
+                const conf = confidence * 100;
+                if (conf >= 70) return 'bg-success';
+                if (conf >= 40) return 'bg-warning';
+                return 'bg-danger';
+            };
+
+            if (prediction.error) {
+                document.getElementById('predictionResults').innerHTML = `
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle-fill"></i> ${prediction.error}
+                    </div>`;
+                return;
+            }
+
+            const resultsHTML = `
+                <div class="row g-4">
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h6 class="card-title d-flex align-items-center">
+                                    <i class="bi bi-graph-up-arrow me-2"></i>
+                                    Price Prediction for ${prediction.ticker}
+                                </h6>
+                                <div class="mt-4">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <span>Current Price:</span>
+                                        <span class="badge bg-secondary prediction-badge">
+                                            $${formatNumber(prediction.current_price)}
+                                        </span>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <span>Predicted Price:</span>
+                                        <span class="badge bg-primary prediction-badge">
+                                            $${formatNumber(prediction.predicted_price)}
+                                            <span class="trend-indicator">
+                                                ${getTrendIcon(prediction.current_price, prediction.predicted_price)}
+                                            </span>
+                                        </span>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Confidence Level</label>
+                                        <div class="confidence-meter">
+                                            <div class="confidence-meter-fill ${getConfidenceClass(prediction.confidence)}"
+                                                 style="width: ${formatPercentage(prediction.confidence)}%"></div>
+                                        </div>
+                                        <small class="text-muted">
+                                            ${formatPercentage(prediction.confidence)}% confidence
+                                        </small>
+                                    </div>
+                                    <small class="text-muted">
+                                        Prediction Date: ${prediction.prediction_date || 'N/A'}
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <i class="bi bi-journal-text me-2"></i>
+                                    Analysis
+                                </h6>
+                                <p class="card-text mt-3">
+                                    ${analysis.analysis || 'Analysis not available'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            document.getElementById('predictionResults').innerHTML = resultsHTML;
+        }
+
+        function updateChart(prediction) {
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            
+            if (priceChart) {
+                priceChart.destroy();
+            }
+
+            const historicalData = prediction.historical_prices || [];
+            const dates = prediction.historical_dates || [];
+            
+            // Add prediction point
+            const allDates = [...dates, prediction.prediction_date];
+            const allPrices = [...historicalData, prediction.predicted_price];
+
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: allDates,
+                    datasets: [{
+                        label: 'Historical Price',
+                        data: historicalData,
+                        borderColor: '#1f77b4',
+                        backgroundColor: 'rgba(31, 119, 180, 0.1)',
+                        fill: true
+                    },
+                    {
+                        label: 'Predicted Price',
+                        data: Array(historicalData.length).fill(null).concat([prediction.predicted_price]),
+                        borderColor: '#ff7f0e',
+                        borderDash: [5, 5],
+                        pointRadius: 6,
+                        pointBackgroundColor: '#ff7f0e'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: $${context.parsed.y.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Date'
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Price ($)'
+                            },
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        }
+
+        // Check health on load
+        checkHealth();
+        // Check health every 30 seconds
+        setInterval(checkHealth, 30000);
+
+        // Handle Enter key in ticker input
+        document.getElementById('tickerInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                analyzeTicker();
+            }
+        });
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
